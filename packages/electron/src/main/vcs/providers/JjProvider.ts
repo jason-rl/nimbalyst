@@ -42,19 +42,19 @@ export class JjProvider implements VcsProvider {
 
   async isIsolatedEnv(workspacePath: string): Promise<boolean> {
     try {
-      const output = await jjCli.exec(['workspace', 'list'], { cwd: workspacePath });
-      const lines = output.split('\n').filter((line) => line.trim());
-      if (lines.length === 0) return false;
+      // jj workspace root returns the root of the current workspace
+      // If we're in a non-default workspace, the directory name will match our pattern
+      const output = await jjCli.exec(
+        ['workspace', 'list', '-T', 'name ++ "\\n"'],
+        { cwd: workspacePath }
+      );
+      const names = output.split('\n').filter((n) => n.trim());
+      // If only 'default' exists, we're not in an isolated env
+      // If multiple exist and we're running from a non-default workspace directory, we are
+      if (names.length <= 1) return false;
 
-      for (const line of lines) {
-        const parts = line.split(':').map((p) => p.trim());
-        if (parts.length < 2) continue;
-        const wsPath = parts[1];
-        if (wsPath === workspacePath) {
-          return parts[0] !== 'default';
-        }
-      }
-      return false;
+      // Check if this path is inside a _worktrees directory (not the main repo)
+      return workspacePath.includes('_worktrees/');
     } catch (error) {
       logger.error('Failed to check if isolated env', { workspacePath, error });
       return false;
@@ -626,7 +626,9 @@ export class JjProvider implements VcsProvider {
       const name = options?.name || this.generateWorkspaceName();
       const baseBranch = options?.baseBranch || 'trunk';
 
-      const workspaceDir = join(workspacePath, '..', `.jj-workspace-${name}`);
+      const projectName = workspacePath.split('/').pop() || 'project';
+      const worktreesDir = join(workspacePath, '..', `${projectName}_worktrees`);
+      const workspaceDir = join(worktreesDir, name);
       await jjCli.exec(['workspace', 'add', '--name', name, workspaceDir], { cwd: workspacePath });
 
       const bookmarkName = `workspace/${name}`;
@@ -649,17 +651,17 @@ export class JjProvider implements VcsProvider {
 
   async deleteIsolatedEnv(envPath: string, workspacePath: string): Promise<void> {
     try {
-      const workspacesOutput = await jjCli.exec(['workspace', 'list'], { cwd: workspacePath });
-      const lines = workspacesOutput.split('\n');
+      // The workspace name is the directory name within the _worktrees folder
+      const wsName = envPath.split('/').pop() || '';
 
-      for (const line of lines) {
-        const parts = line.split(':').map((p) => p.trim());
-        if (parts.length < 2) continue;
-        if (parts[1] === envPath) {
-          const wsName = parts[0];
-          await jjCli.exec(['workspace', 'forget', wsName], { cwd: workspacePath });
-          break;
-        }
+      if (wsName) {
+        await jjCli.exec(['workspace', 'forget', wsName], { cwd: workspacePath });
+      }
+
+      // Remove the directory
+      const fs = await import('fs/promises');
+      if (await fs.stat(envPath).catch(() => null)) {
+        await fs.rm(envPath, { recursive: true, force: true });
       }
     } catch (error) {
       logger.error('Failed to delete isolated env', { envPath, workspacePath, error });
@@ -669,17 +671,22 @@ export class JjProvider implements VcsProvider {
 
   async listIsolatedEnvs(workspacePath: string): Promise<VcsIsolatedEnvListEntry[]> {
     try {
-      const output = await jjCli.exec(['workspace', 'list'], { cwd: workspacePath });
-      const lines = output.split('\n').filter((line) => line.trim());
+      const output = await jjCli.exec(
+        ['workspace', 'list', '-T', 'name ++ "\\n"'],
+        { cwd: workspacePath }
+      );
+      const names = output.split('\n').filter((n) => n.trim());
+      const projectName = workspacePath.split('/').pop() || 'project';
+      const worktreesDir = join(workspacePath, '..', `${projectName}_worktrees`);
 
-      return lines.map((line) => {
-        const parts = line.split(':').map((p) => p.trim());
-        const name = parts[0] || '';
-        const path = parts[1] || '';
+      return names.map((name) => {
+        const wsPath = name === 'default'
+          ? workspacePath
+          : join(worktreesDir, name);
 
         return {
-          path,
-          branch: `workspace/${name}`,
+          path: wsPath,
+          branch: name === 'default' ? '' : `workspace/${name}`,
           isMain: name === 'default',
         };
       });

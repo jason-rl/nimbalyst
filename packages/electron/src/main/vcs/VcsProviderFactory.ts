@@ -19,7 +19,12 @@ export function detectVcsType(workspacePath: string): VcsType | null {
 
 export function getVcsProvider(workspacePath: string): VcsProvider | null {
   const cached = providerCache.get(workspacePath);
-  if (cached) return cached;
+  if (cached) {
+    // Re-validate: if .jj was added/removed, the cached provider type may be stale
+    const currentType = detectVcsType(workspacePath);
+    if (currentType === cached.type) return cached;
+    providerCache.delete(workspacePath);
+  }
 
   const type = detectVcsType(workspacePath);
   if (!type) return null;
