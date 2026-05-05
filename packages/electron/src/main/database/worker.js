@@ -1492,6 +1492,24 @@ class PGLiteWorker {
       throw error;
     }
 
+    // Add vcs_type column to worktrees for jj (Jujutsu) support
+    try {
+      await this.db.exec(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'worktrees' AND column_name = 'vcs_type'
+          ) THEN
+            ALTER TABLE worktrees ADD COLUMN vcs_type TEXT DEFAULT 'git';
+          END IF;
+        END $$;
+      `);
+    } catch (error) {
+      console.error('[PGLite Worker] Failed to add vcs_type column:', error);
+      throw error;
+    }
+
     // Add parent_session_id column to ai_sessions for hierarchical sessions (migration)
     // This enables workstreams (grouped sessions) and hierarchical worktree sessions
     // - parent_session_id = NULL means root level session (shows in left panel)

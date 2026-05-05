@@ -25,6 +25,7 @@ export interface Worktree {
   updatedAt?: number;
   isPinned?: boolean; // Whether this worktree is pinned to the top of the list
   isArchived?: boolean; // Whether this worktree is archived
+  vcsType?: 'git' | 'jj';
 }
 
 /**
@@ -42,6 +43,7 @@ interface WorktreeRow {
   updated_at: Date | string | number;
   is_pinned?: boolean;
   is_archived?: boolean;
+  vcs_type?: string;
 }
 
 /**
@@ -83,9 +85,9 @@ export function createWorktreeStore(db: PGliteLike, ensureDbReady?: EnsureReadyF
 
       await db.query(
         `INSERT INTO worktrees (
-          id, workspace_id, name, path, branch, base_branch, created_at, updated_at
+          id, workspace_id, name, path, branch, base_branch, created_at, updated_at, vcs_type
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8
+          $1, $2, $3, $4, $5, $6, $7, $8, $9
         )`,
         [
           worktree.id,
@@ -96,6 +98,7 @@ export function createWorktreeStore(db: PGliteLike, ensureDbReady?: EnsureReadyF
           worktree.baseBranch,
           createdAt,
           updatedAt,
+          worktree.vcsType || 'git',
         ]
       );
 
@@ -133,6 +136,7 @@ export function createWorktreeStore(db: PGliteLike, ensureDbReady?: EnsureReadyF
         updatedAt: toMillis(row.updated_at)!,
         isPinned: row.is_pinned ?? false,
         isArchived: row.is_archived ?? false,
+        vcsType: (row.vcs_type as 'git' | 'jj') ?? 'git',
       };
 
       return worktree;
@@ -206,6 +210,7 @@ export function createWorktreeStore(db: PGliteLike, ensureDbReady?: EnsureReadyF
         updatedAt: toMillis(row.updated_at)!,
         isPinned: row.is_pinned ?? false,
         isArchived: row.is_archived ?? false,
+        vcsType: (row.vcs_type as 'git' | 'jj') ?? 'git',
       };
 
       return worktree;

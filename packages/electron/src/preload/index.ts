@@ -906,6 +906,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       }>,
   },
 
+  // VCS info
+  vcsGetInfo: (workspacePath: string) =>
+    ipcRenderer.invoke('vcs:info', workspacePath),
+  vcsGetType: (workspacePath: string) =>
+    ipcRenderer.invoke('vcs:type', workspacePath),
+
   // Worktree operations
   worktreeCreate: (workspacePath: string, name?: string) =>
     ipcRenderer.invoke('worktree:create', workspacePath, name),
