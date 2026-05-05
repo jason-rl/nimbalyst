@@ -706,6 +706,10 @@ interface ElectronAPI {
     getPersonalJwt: () => Promise<{ success: boolean; jwt?: string; error?: string }>;
   };
 
+  // VCS info
+  vcsGetInfo: (workspacePath: string) => Promise<{ type: 'git' | 'jj'; terminology: any } | null>;
+  vcsGetType: (workspacePath: string) => Promise<string | null>;
+
   // Worktree operations
   worktreeCreate: (workspacePath: string, name?: string) => Promise<{
     success: boolean;

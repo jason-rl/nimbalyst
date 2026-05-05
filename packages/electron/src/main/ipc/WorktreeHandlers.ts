@@ -7,8 +7,6 @@
 
 import { ipcMain, BrowserWindow } from 'electron';
 import log from 'electron-log/main';
-import simpleGit from 'simple-git';
-import { GitWorktreeService } from '../services/GitWorktreeService';
 import { WorktreeStore, createWorktreeStore } from '../services/WorktreeStore';
 import { getDatabase } from '../database/initialize';
 import { archiveProgressManager } from '../services/ArchiveProgressManager';
@@ -19,6 +17,7 @@ import { getTerminalsByWorktreeId, deleteTerminalInstance } from '../utils/termi
 import { vcsRefWatcher } from '../file/VcsRefWatcher';
 import type { WorktreeCreateResult } from '../../shared/ipc/types';
 import { gitOperationLock } from '../services/GitOperationLock';
+import { getVcsProvider } from '../vcs/VcsProviderFactory';
 import fs from 'node:fs';
 
 const logger = log.scope('WorktreeHandlers');
@@ -125,7 +124,10 @@ export async function archiveWorktree(worktreeId: string, workspacePath: string)
       await worktreeStore.updateArchived(worktreeId, false);
     }
 
-    const gitWorktreeService = new GitWorktreeService();
+    const provider = getVcsProvider(workspacePath);
+    if (!provider) {
+      throw new Error('Not a version control repository');
+    }
 
     // Step 1: Get all sessions for this worktree
     const sessionIds = await worktreeStore.getWorktreeSessions(worktreeId);
@@ -135,7 +137,7 @@ export async function archiveWorktree(worktreeId: string, workspacePath: string)
     let hasUncommittedChanges = false;
     let hasUnmergedChanges = false;
     try {
-      const gitStatus = await gitWorktreeService.getWorktreeStatus(worktree.path, worktree.baseBranch);
+      const gitStatus = await provider.getIsolatedEnvStatus(worktree.path, worktree.baseBranch);
       hasUncommittedChanges = gitStatus.hasUncommittedChanges;
       hasUnmergedChanges = !gitStatus.isMerged;
     } catch (statusError) {
@@ -216,7 +218,7 @@ export async function archiveWorktree(worktreeId: string, workspacePath: string)
         archiveProgressManager.updateTaskStatus(worktreeId, 'removing-worktree');
 
         // Remove the git worktree from disk (throws if directory still exists after cleanup)
-        await gitWorktreeService.deleteWorktree(worktree.path, workspacePath);
+        await provider.deleteIsolatedEnv(worktree.path, workspacePath);
 
         archiveLogger.info('Worktree cleanup completed, now marking as archived in database', { worktreeId });
 
@@ -281,7 +283,6 @@ export async function archiveWorktree(worktreeId: string, workspacePath: string)
  * Register worktree IPC handlers
  */
 export function registerWorktreeHandlers(): void {
-  const gitWorktreeService = new GitWorktreeService();
   let watchersInitialized = false;
 
   // In-flight request dedup for worktree:get-status -- if multiple sessions share
@@ -298,6 +299,14 @@ export function registerWorktreeHandlers(): void {
   ipcMain.handle('worktree:create', async (_event, workspacePath: string, name?: string): Promise<WorktreeCreateResult> => {
     const startTime = Date.now();
     const MAX_RETRIES = 3;
+
+    const provider = getVcsProvider(workspacePath);
+    if (!provider) {
+      return {
+        success: false,
+        error: 'Not a version control repository',
+      };
+    }
 
     // Retry loop for handling race conditions where concurrent requests pick the same name
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -320,42 +329,22 @@ export function registerWorktreeHandlers(): void {
 
         const worktreeStore = createWorktreeStore(db);
 
-        // If no custom name provided, generate a unique name using all three sources
-        let finalName = name;
-        if (!finalName) {
-          // Gather existing names from all three sources in parallel
-          const dedupeStartTime = Date.now();
-
-          const [dbNames, filesystemNames, branchNames] = await Promise.all([
-            worktreeStore.getAllNames(),
-            Promise.resolve(gitWorktreeService.getExistingWorktreeDirectories(workspacePath)),
-            gitWorktreeService.getAllBranchNames(workspacePath),
-          ]);
-
-          timings.deduplication = Date.now() - dedupeStartTime;
-
-          // Combine all existing names into a single set
-          const existingNames = new Set<string>();
-          for (const dbName of dbNames) existingNames.add(dbName);
-          for (const fsName of filesystemNames) existingNames.add(fsName);
-          for (const branchName of branchNames) existingNames.add(branchName);
-
-          logger.info('Gathered existing names for de-duplication', {
-            dbCount: dbNames.size,
-            filesystemCount: filesystemNames.size,
-            branchCount: branchNames.size,
-            totalUnique: existingNames.size,
-            durationMs: timings.deduplication,
-          });
-
-          // Generate a unique name
-          finalName = gitWorktreeService.generateUniqueWorktreeName(existingNames);
-        }
-
-        // Create the git worktree
+        // Create the isolated environment (worktree)
         const gitCreateStartTime = Date.now();
-        const worktree = await gitWorktreeService.createWorktree(workspacePath, { name: finalName });
+        const isolatedEnv = await provider.createIsolatedEnv(workspacePath, name ? { name } : undefined);
         timings.gitWorktreeCreate = Date.now() - gitCreateStartTime;
+
+        // Map VcsIsolatedEnv to Worktree interface for DB storage
+        const worktree = {
+          id: isolatedEnv.id,
+          name: isolatedEnv.name,
+          path: isolatedEnv.path,
+          branch: isolatedEnv.branch,
+          baseBranch: isolatedEnv.baseBranch,
+          projectPath: isolatedEnv.projectPath,
+          createdAt: isolatedEnv.createdAt,
+          vcsType: provider.type,
+        };
 
         // Track the created worktree for potential cleanup
         createdWorktree = { path: worktree.path, branch: worktree.branch };
@@ -409,7 +398,7 @@ export function registerWorktreeHandlers(): void {
             worktreePath: createdWorktree.path,
           });
           try {
-            await gitWorktreeService.deleteWorktree(createdWorktree.path, workspacePath);
+            await provider.deleteIsolatedEnv(createdWorktree.path, workspacePath);
             logger.info('Successfully cleaned up orphaned worktree', { worktreePath: createdWorktree.path });
           } catch (cleanupError) {
             logger.error('Failed to clean up orphaned worktree - manual cleanup required', {
@@ -471,6 +460,11 @@ export function registerWorktreeHandlers(): void {
       try {
         logger.info('Getting worktree status', { worktreePath, fetchFirst: options?.fetchFirst });
 
+        const provider = getVcsProvider(worktreePath);
+        if (!provider) {
+          return { success: false, error: 'Not a version control repository' };
+        }
+
         // Look up the worktree to get the stored base branch
         const db = getDatabase();
         let baseBranch: string | undefined;
@@ -481,17 +475,16 @@ export function registerWorktreeHandlers(): void {
           logger.info('Found worktree base branch for status', { worktreePath, baseBranch: baseBranch || 'not found' });
         }
 
-        // Fetch latest remote refs for accurate merge detection
-        if (options?.fetchFirst && baseBranch) {
+        // Fetch latest remote refs for accurate merge detection (only for git)
+        if (options?.fetchFirst && baseBranch && provider.type === 'git') {
           try {
-            const git = simpleGit(worktreePath);
-            await git.fetch(['origin', baseBranch]);
+            await provider.fetch(worktreePath, { remote: 'origin' });
           } catch (fetchError) {
             logger.warn('Failed to fetch base branch before status check (continuing with local refs)', { fetchError });
           }
         }
 
-        const status = await gitWorktreeService.getWorktreeStatus(worktreePath, baseBranch);
+        const status = await provider.getIsolatedEnvStatus(worktreePath, baseBranch);
 
         return {
           success: true,
@@ -533,6 +526,11 @@ export function registerWorktreeHandlers(): void {
 
       logger.info('Deleting worktree', { worktreeId, workspacePath });
 
+      const provider = getVcsProvider(workspacePath);
+      if (!provider) {
+        return { success: false, error: 'Not a version control repository' };
+      }
+
       // Get worktree from database to find its path
       const db = getDatabase();
       if (!db) {
@@ -550,7 +548,7 @@ export function registerWorktreeHandlers(): void {
       await vcsRefWatcher.stop(worktree.path);
 
       // Delete the git worktree
-      await gitWorktreeService.deleteWorktree(worktree.path, workspacePath);
+      await provider.deleteIsolatedEnv(worktree.path, workspacePath);
 
       // Delete the database record
       await worktreeStore.delete(worktreeId);
@@ -891,7 +889,12 @@ export function registerWorktreeHandlers(): void {
 
       logger.info('Getting changed files', { worktreePath });
 
-      const changedFiles = await gitWorktreeService.getChangedFiles(worktreePath);
+      const provider = getVcsProvider(worktreePath);
+      if (!provider) {
+        return { success: false, error: 'Not a version control repository', files: [] };
+      }
+
+      const changedFiles = await provider.getIsolatedEnvChangedFiles(worktreePath);
 
       return {
         success: true,
@@ -925,6 +928,11 @@ export function registerWorktreeHandlers(): void {
 
       logger.info('Getting file diff', { worktreePath, filePath });
 
+      const provider = getVcsProvider(worktreePath);
+      if (!provider) {
+        return { success: false, error: 'Not a version control repository' };
+      }
+
       // Look up the worktree to get the stored base branch
       const db = getDatabase();
       let baseBranch: string | undefined;
@@ -934,7 +942,7 @@ export function registerWorktreeHandlers(): void {
         baseBranch = worktree?.baseBranch;
       }
 
-      const diff = await gitWorktreeService.getFileDiff(worktreePath, filePath, baseBranch);
+      const diff = await provider.getIsolatedEnvFileDiff(worktreePath, filePath, baseBranch);
 
       return {
         success: true,
@@ -963,6 +971,11 @@ export function registerWorktreeHandlers(): void {
 
       logger.info('Getting worktree commits', { worktreePath });
 
+      const provider = getVcsProvider(worktreePath);
+      if (!provider) {
+        return { success: false, error: 'Not a version control repository', commits: [] };
+      }
+
       // Look up the worktree to get the stored base branch
       const db = getDatabase();
       let baseBranch: string | undefined;
@@ -973,23 +986,11 @@ export function registerWorktreeHandlers(): void {
         logger.info('Found worktree base branch', { worktreePath, baseBranch: baseBranch || 'not found' });
       }
 
-      const commits = await gitWorktreeService.getWorktreeCommits(worktreePath, baseBranch);
-
-      // Convert Date objects to ISO strings for IPC serialization
-      // Date objects don't survive Electron IPC correctly in arrays
-      const serializedCommits = commits.map(commit => {
-        const dateValue = commit.date instanceof Date && !isNaN(commit.date.getTime())
-          ? commit.date.toISOString()
-          : new Date().toISOString();
-        return {
-          ...commit,
-          date: dateValue,
-        };
-      });
+      const commits = await provider.getIsolatedEnvCommits(worktreePath, baseBranch);
 
       return {
         success: true,
-        commits: serializedCommits,
+        commits,
       };
     } catch (error) {
       logger.error('Failed to get worktree commits:', error);
@@ -1020,20 +1021,19 @@ export function registerWorktreeHandlers(): void {
 
       logger.info('Committing changes', { worktreePath, message, fileCount: files?.length });
 
-      const commit = await gitWorktreeService.commitChanges(worktreePath, message, files);
+      const provider = getVcsProvider(worktreePath);
+      if (!provider) {
+        return { success: false, error: 'Not a version control repository' };
+      }
 
-      // Convert Date object to ISO string for IPC serialization
-      const dateValue = commit.date instanceof Date && !isNaN(commit.date.getTime())
-        ? commit.date.toISOString()
-        : new Date().toISOString();
-      const serializedCommit = {
-        ...commit,
-        date: dateValue,
-      };
+      const result = await provider.commitInEnv(worktreePath, message, files);
 
       return {
         success: true,
-        commit: serializedCommit,
+        commit: {
+          hash: result.commitHash,
+          date: result.commitDate,
+        },
       };
     } catch (error) {
       logger.error('Failed to commit changes:', error);
@@ -1059,7 +1059,12 @@ export function registerWorktreeHandlers(): void {
 
       logger.info('Getting current branch for repo', { repoPath });
 
-      const currentBranch = await gitWorktreeService.getRepoCurrentBranch(repoPath);
+      const provider = getVcsProvider(repoPath);
+      if (!provider) {
+        return { success: false, error: 'Not a version control repository' };
+      }
+
+      const currentBranch = await provider.getRepoCurrentBranch(repoPath);
 
       return {
         success: true,
@@ -1092,7 +1097,12 @@ export function registerWorktreeHandlers(): void {
 
       logger.info('Merging worktree to main', { worktreePath, mainRepoPath });
 
-      const result = await gitWorktreeService.mergeToMain(worktreePath, mainRepoPath);
+      const provider = getVcsProvider(mainRepoPath);
+      if (!provider) {
+        return { success: false, error: 'Not a version control repository' };
+      }
+
+      const result = await provider.mergeToMain(worktreePath, mainRepoPath);
 
       // Track merge attempt
       const analyticsService = AnalyticsService.getInstance();
@@ -1138,6 +1148,11 @@ export function registerWorktreeHandlers(): void {
 
       logger.info('Rebasing worktree from base branch', { worktreePath });
 
+      const provider = getVcsProvider(worktreePath);
+      if (!provider) {
+        return { success: false, error: 'Not a version control repository' };
+      }
+
       // Look up the worktree to get the stored base branch
       const db = getDatabase();
       if (!db) {
@@ -1155,22 +1170,19 @@ export function registerWorktreeHandlers(): void {
         throw new Error('Worktree has no base branch stored');
       }
 
-      const result = await gitWorktreeService.rebaseFromBase(worktreePath, worktree.baseBranch);
+      const result = await provider.rebaseFromBase(worktreePath, worktree.baseBranch);
 
       // Track rebase attempt
       const analyticsService = AnalyticsService.getInstance();
       analyticsService.sendEvent('worktree_rebase_attempted', {
         success: result.success,
         had_conflicts: !!(result.conflictedFiles && result.conflictedFiles.length > 0),
-        had_untracked_files_conflict: !!(result.untrackedFiles && result.untrackedFiles.length > 0),
       });
 
       return {
         success: result.success,
         message: result.message,
         conflictedFiles: result.conflictedFiles,
-        conflictingCommits: result.conflictingCommits,
-        untrackedFiles: result.untrackedFiles,
       };
     } catch (error) {
       logger.error('Failed to rebase worktree:', error);
@@ -1249,7 +1261,12 @@ export function registerWorktreeHandlers(): void {
 
       logger.info('Checking commits existence', { worktreePath, commitCount: commitHashes.length });
 
-      const existsElsewhere = await gitWorktreeService.checkCommitsExistElsewhere(worktreePath, commitHashes);
+      const provider = getVcsProvider(worktreePath);
+      if (!provider) {
+        return { success: false, error: 'Not a version control repository', existsElsewhere: false };
+      }
+
+      const existsElsewhere = await provider.checkCommitsExistElsewhere(worktreePath, commitHashes);
 
       return {
         success: true,
@@ -1289,7 +1306,12 @@ export function registerWorktreeHandlers(): void {
 
       logger.info('Squashing commits', { worktreePath, commitCount: commitHashes.length });
 
-      const newCommitHash = await gitWorktreeService.squashCommits(worktreePath, commitHashes, message);
+      const provider = getVcsProvider(worktreePath);
+      if (!provider) {
+        return { success: false, error: 'Not a version control repository' };
+      }
+
+      const newCommitHash = await provider.squashCommits(worktreePath, commitHashes, message);
 
       return {
         success: true,
@@ -1323,14 +1345,12 @@ export function registerWorktreeHandlers(): void {
       return await gitOperationLock.withLock(worktreePath, 'worktree:stage-file', async () => {
         logger.info('Staging/unstaging file', { worktreePath, filePath, stage });
 
-        const simpleGit = (await import('simple-git')).default;
-        const git = simpleGit(worktreePath);
-
-        if (stage) {
-          await git.add(filePath);
-        } else {
-          await git.reset(['--', filePath]);
+        const provider = getVcsProvider(worktreePath);
+        if (!provider) {
+          return { success: false, error: 'Not a version control repository' };
         }
+
+        await provider.stageInEnv(worktreePath, [filePath], stage);
 
         // Emit git status changed event so UI updates
         emitGitStatusChanged(worktreePath);
@@ -1361,14 +1381,12 @@ export function registerWorktreeHandlers(): void {
       return await gitOperationLock.withLock(worktreePath, 'worktree:stage-all', async () => {
         logger.info('Staging/unstaging all files', { worktreePath, stage });
 
-        const simpleGit = (await import('simple-git')).default;
-        const git = simpleGit(worktreePath);
-
-        if (stage) {
-          await git.add('-A');
-        } else {
-          await git.reset();
+        const provider = getVcsProvider(worktreePath);
+        if (!provider) {
+          return { success: false, error: 'Not a version control repository' };
         }
+
+        await provider.stageAllInEnv(worktreePath, stage);
 
         // Emit git status changed event so UI updates
         emitGitStatusChanged(worktreePath);
@@ -1423,7 +1441,13 @@ export function registerWorktreeHandlers(): void {
       }
 
       logger.info('Listing gitignored files for worktree', { worktreePath });
-      const files = await gitWorktreeService.listGitignoredFiles(worktreePath);
+
+      const provider = getVcsProvider(worktreePath);
+      if (!provider) {
+        return { success: false, error: 'Not a version control repository', files: [], count: 0 };
+      }
+
+      const files = await provider.listIgnoredFiles(worktreePath);
       logger.info('Listed gitignored files', { worktreePath, count: files.length });
 
       return { success: true, files, count: files.length };
@@ -1450,7 +1474,12 @@ export function registerWorktreeHandlers(): void {
         throw new Error('worktreePath is required');
       }
 
-      const removed = await gitWorktreeService.cleanGitignoredFiles(worktreePath);
+      const provider = getVcsProvider(worktreePath);
+      if (!provider) {
+        return { success: false, error: 'Not a version control repository' };
+      }
+
+      const removed = await provider.cleanIgnoredFiles(worktreePath);
 
       return { success: true, removed, count: removed.length };
     } catch (error) {
