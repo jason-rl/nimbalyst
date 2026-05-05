@@ -1,9 +1,7 @@
 import { resolve, relative } from 'path';
 import { SessionFilesRepository } from '@nimbalyst/runtime';
-import { GitStatusService } from '../services/GitStatusService';
 import { safeHandle } from '../utils/ipcRegistry';
-
-const gitStatusService = new GitStatusService();
+import { getVcsProvider, clearProviderCache } from '../vcs/VcsProviderFactory';
 
 export function registerGitStatusHandlers(): void {
   /**
@@ -15,7 +13,14 @@ export function registerGitStatusHandlers(): void {
    */
   safeHandle('git:get-file-status', async (_event, workspacePath: string, filePaths: string[]) => {
     try {
-      const status = await gitStatusService.getFileStatus(workspacePath, filePaths);
+      const provider = getVcsProvider(workspacePath);
+      if (!provider) {
+        return {
+          success: false,
+          error: 'Not a version control repository'
+        };
+      }
+      const status = await provider.getFileStatuses(workspacePath, filePaths);
       return { success: true, status };
     } catch (error) {
       console.error('[GitStatusHandlers] Failed to get file status:', error);
@@ -35,7 +40,15 @@ export function registerGitStatusHandlers(): void {
    */
   safeHandle('git:get-uncommitted-files', async (_event, workspacePath: string) => {
     try {
-      const files = await gitStatusService.getUncommittedFiles(workspacePath);
+      const provider = getVcsProvider(workspacePath);
+      if (!provider) {
+        return {
+          success: false,
+          error: 'Not a version control repository',
+          files: []
+        };
+      }
+      const files = await provider.getUncommittedFiles(workspacePath);
       return { success: true, files };
     } catch (error) {
       console.error('[GitStatusHandlers] Failed to get uncommitted files:', error);
@@ -55,7 +68,8 @@ export function registerGitStatusHandlers(): void {
    */
   safeHandle('git:is-repo', async (_event, workspacePath: string) => {
     try {
-      const isRepo = await gitStatusService.isGitRepo(workspacePath);
+      const provider = getVcsProvider(workspacePath);
+      const isRepo = provider !== null && await provider.isRepository(workspacePath);
       return { success: true, isRepo };
     } catch (error) {
       console.error('[GitStatusHandlers] Failed to check if git repo:', error);
@@ -75,7 +89,11 @@ export function registerGitStatusHandlers(): void {
    */
   safeHandle('git:is-worktree', async (_event, workspacePath: string) => {
     try {
-      const isWorktree = await gitStatusService.isGitWorktree(workspacePath);
+      const provider = getVcsProvider(workspacePath);
+      if (!provider) {
+        return { success: true, isWorktree: false };
+      }
+      const isWorktree = await provider.isIsolatedEnv(workspacePath);
       return { success: true, isWorktree };
     } catch (error) {
       console.error('[GitStatusHandlers] Failed to check if git worktree:', error);
@@ -96,7 +114,15 @@ export function registerGitStatusHandlers(): void {
    */
   safeHandle('git:get-worktree-modified-files', async (_event, workspacePath: string) => {
     try {
-      const files = await gitStatusService.getWorktreeModifiedFiles(workspacePath);
+      const provider = getVcsProvider(workspacePath);
+      if (!provider) {
+        return {
+          success: false,
+          error: 'Not a version control repository',
+          files: []
+        };
+      }
+      const files = await provider.getModifiedFilesVsBase(workspacePath);
       return { success: true, files };
     } catch (error) {
       console.error('[GitStatusHandlers] Failed to get worktree modified files:', error);
@@ -117,7 +143,15 @@ export function registerGitStatusHandlers(): void {
    */
   safeHandle('git:get-all-file-statuses', async (_event, workspacePath: string) => {
     try {
-      const statuses = await gitStatusService.getAllFileStatuses(workspacePath);
+      const provider = getVcsProvider(workspacePath);
+      if (!provider) {
+        return {
+          success: false,
+          error: 'Not a version control repository',
+          statuses: {}
+        };
+      }
+      const statuses = await provider.getAllFileStatuses(workspacePath);
       return { success: true, statuses };
     } catch (error) {
       console.error('[GitStatusHandlers] Failed to get all file statuses:', error);
@@ -164,7 +198,16 @@ export function registerGitStatusHandlers(): void {
         }
 
         // Get all uncommitted file statuses
-        const allStatuses = await gitStatusService.getAllFileStatuses(workspacePath);
+        const provider = getVcsProvider(workspacePath);
+        if (!provider) {
+          return {
+            success: false,
+            files: [],
+            scenario,
+            error: 'Not a version control repository',
+          };
+        }
+        const allStatuses = await provider.getAllFileStatuses(workspacePath);
 
         // Cross-reference: only session-edited files that still have uncommitted changes
         const seen = new Set<string>();
@@ -214,7 +257,12 @@ export function registerGitStatusHandlers(): void {
    */
   safeHandle('git:clear-status-cache', async (_event, workspacePath?: string) => {
     try {
-      gitStatusService.clearCache(workspacePath);
+      if (workspacePath) {
+        const provider = getVcsProvider(workspacePath);
+        provider?.clearStatusCache(workspacePath);
+      } else {
+        clearProviderCache();
+      }
       return { success: true };
     } catch (error) {
       console.error('[GitStatusHandlers] Failed to clear cache:', error);
@@ -231,5 +279,10 @@ export function registerGitStatusHandlers(): void {
  * Called by other parts of the system when git operations occur
  */
 export function clearGitStatusCache(workspacePath?: string): void {
-  gitStatusService.clearCache(workspacePath);
+  if (workspacePath) {
+    const provider = getVcsProvider(workspacePath);
+    provider?.clearStatusCache(workspacePath);
+  } else {
+    clearProviderCache();
+  }
 }
