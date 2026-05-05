@@ -23,6 +23,7 @@ import {
   type FileEditWithSession,
 } from '../atoms/sessionFiles';
 import { workstreamStagedFilesAtom, setWorkstreamStagedFilesAtom } from '../atoms/workstreamState';
+import { vcsInfoAtom } from '../atoms/vcsInfo';
 import { getRelativeWorkspacePath } from '../../../shared/pathUtils';
 
 /**
@@ -186,6 +187,16 @@ export function initFileStateListeners(workspacePath: string): () => void {
       }
     } catch (error) {
       console.error('[fileStateListeners] Failed to load initial uncommitted files:', error);
+    }
+  })();
+
+  // Load VCS info for workspace
+  (async () => {
+    try {
+      const vcsInfo = await window.electronAPI.vcsGetInfo(workspacePath);
+      store.set(vcsInfoAtom, vcsInfo);
+    } catch (error) {
+      console.error('[fileStateListeners] Failed to load VCS info:', error);
     }
   })();
 

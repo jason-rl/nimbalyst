@@ -16,6 +16,8 @@ import { getTimeGroupKey, TimeGroupKey } from '../../utils/dateFormatting';
 import { getFileName } from '../../utils/pathUtils';
 import { KeyboardShortcuts, getShortcutDisplay } from '../../../shared/KeyboardShortcuts';
 import { MaterialSymbol } from '@nimbalyst/runtime';
+import { vcsInfoAtom } from '../../store/atoms/vcsInfo';
+import { GIT_TERMINOLOGY } from '../../../shared/vcs/types';
 import {
   sessionListRootAtom,
   sessionListLoadingAtom,
@@ -182,6 +184,8 @@ const SessionHistoryComponent: React.FC<SessionHistoryProps> = ({
   const isSuperLoopsAlphaEnabled = useAtomValue(alphaFeatureEnabledAtom('super-loops'));
   const isSuperLoopsAvailable = isWorktreesAvailable && isSuperLoopsAlphaEnabled;
   const isMetaAgentEnabled = useAtomValue(alphaFeatureEnabledAtom('meta-agent'));
+  const vcsInfo = useAtomValue(vcsInfoAtom);
+  const terminology = vcsInfo?.terminology ?? GIT_TERMINOLOGY;
 
   // === Super Loop state ===
   const superLoops = useAtomValue(superLoopListAtom);
@@ -2991,7 +2995,7 @@ const SessionHistoryComponent: React.FC<SessionHistoryProps> = ({
               data-testid="new-worktree-session-button"
               onClick={() => { if (isGitRepo) { onNewWorktreeSession(); setNewDropdownOpen(false); setNewDropdownPosition(null); } }}
               disabled={!isGitRepo}
-              title={!isGitRepo ? 'Worktrees require a git repository' : undefined}
+              title={!isGitRepo ? `${terminology.worktrees.charAt(0).toUpperCase() + terminology.worktrees.slice(1)} require a ${vcsInfo?.type ?? 'git'} repository` : undefined}
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M5 13v-2.5a1.5 1.5 0 0 1 1.5-1.5h3"/>
@@ -3001,7 +3005,7 @@ const SessionHistoryComponent: React.FC<SessionHistoryProps> = ({
                 <path d="M5 6v2.5a1.5 1.5 0 0 0 1.5 1.5"/>
                 <path d="M12 7v4M10 9h4"/>
               </svg>
-              <span>New Worktree</span>
+              <span>New {terminology.worktree.charAt(0).toUpperCase() + terminology.worktree.slice(1)}</span>
               <span className="session-history-new-option-shortcut flex-none text-[11px] text-[var(--nim-text-muted)] opacity-70">{getShortcutDisplay(KeyboardShortcuts.window.newWorktree)}</span>
             </button>
           )}

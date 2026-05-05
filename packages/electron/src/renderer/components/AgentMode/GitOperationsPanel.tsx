@@ -19,6 +19,8 @@ import {
   isCommittingAtom,
   worktreeRefreshCounterAtom,
 } from '../../store/atoms/gitOperations';
+import { vcsInfoAtom } from '../../store/atoms/vcsInfo';
+import { GIT_TERMINOLOGY } from '../../../shared/vcs/types';
 import {
   workstreamStagedFilesAtom,
   workstreamCommitMessageAtom,
@@ -87,6 +89,8 @@ export const GitOperationsPanel: React.FC<GitOperationsPanelProps> = React.memo(
     const setGitCommits = useSetAtom(gitCommitsAtom);
     const isCommitting = useAtomValue(isCommittingAtom);
     const setIsCommitting = useSetAtom(isCommittingAtom);
+    const vcsInfo = useAtomValue(vcsInfoAtom);
+    const terminology = vcsInfo?.terminology ?? GIT_TERMINOLOGY;
 
     // Local state for commit workflow mode (manual vs smart)
     const [commitMode, setCommitMode] = useState<'manual' | 'smart'>('smart');
@@ -1282,10 +1286,10 @@ Please proceed with this strategy.`;
             <MaterialSymbol icon={isExpanded ? 'expand_more' : 'chevron_right'} size={16} />
             <MaterialSymbol icon="account_tree" size={14} />
             <span className="git-operations-panel__branch font-semibold text-[var(--nim-text)]">
-              {worktreeId && worktreeName ? `worktree/${worktreeName}` : gitStatus.branch}
+              {worktreeId && worktreeName ? `${terminology.worktree}/${worktreeName}` : gitStatus.branch}
             </span>
             {!worktreeId && (gitStatus.ahead > 0 || gitStatus.behind > 0) && (
-              <span className="git-operations-panel__sync-status text-[11px] text-[var(--nim-text-faint)] font-[var(--nim-font-mono)]">
+              <span className="git-operations-panel__sync-status text-[11px] text-[var(--nim-text-faint)] font-[var(--nim-font-mono)]" title={`${gitStatus.ahead} ${terminology.commits} ahead, ${gitStatus.behind} ${terminology.commits} behind`}>
                 {gitStatus.ahead > 0 && `↑${gitStatus.ahead}`}
                 {gitStatus.behind > 0 && ` ↓${gitStatus.behind}`}
               </span>
@@ -1405,7 +1409,7 @@ Please proceed with this strategy.`;
                     {worktreeCommitsBehind > 0 && (
                       <span className="flex items-center gap-1.5 text-[var(--nim-warning)] font-medium">
                         <MaterialSymbol icon="warning" size={14} />
-                        {worktreeCommitsBehind} commit{worktreeCommitsBehind !== 1 ? 's' : ''} behind {worktreeRepoRootBranch || 'base'}
+                        {worktreeCommitsBehind} {terminology.commit}{worktreeCommitsBehind !== 1 ? 's' : ''} behind {worktreeRepoRootBranch || 'base'}
                       </span>
                     )}
                     {worktreeIsMerged && (
@@ -1461,10 +1465,10 @@ Please proceed with this strategy.`;
                     disabled={!worktreeCanRebase}
                     title={
                       worktreeCommitsBehind === 0
-                        ? 'Already up to date with base branch'
+                        ? `Already up to date with base ${terminology.branch}`
                         : worktreeHasUncommittedChanges
-                          ? `Bring in ${worktreeCommitsBehind} commit${worktreeCommitsBehind === 1 ? '' : 's'} from ${worktreeRepoRootBranch || 'base branch'} (uncommitted changes will be auto-stashed)`
-                          : `Bring in ${worktreeCommitsBehind} commit${worktreeCommitsBehind === 1 ? '' : 's'} from ${worktreeRepoRootBranch || 'base branch'}`
+                          ? `Bring in ${worktreeCommitsBehind} ${terminology.commit}${worktreeCommitsBehind === 1 ? '' : 's'} from ${worktreeRepoRootBranch || `base ${terminology.branch}`} (uncommitted changes will be auto-stashed)`
+                          : `Bring in ${worktreeCommitsBehind} ${terminology.commit}${worktreeCommitsBehind === 1 ? '' : 's'} from ${worktreeRepoRootBranch || `base ${terminology.branch}`}`
                     }
                   >
                     {worktreeIsRebasing ? (
@@ -1486,12 +1490,12 @@ Please proceed with this strategy.`;
                     disabled={!worktreeCanMerge}
                     title={
                       worktreeIsMerged
-                        ? 'Already merged to base branch'
+                        ? `Already merged to base ${terminology.branch}`
                         : worktreeCommitsBehind > 0
-                          ? `Rebase first to bring in ${worktreeCommitsBehind} commit${worktreeCommitsBehind === 1 ? '' : 's'} from ${worktreeRepoRootBranch || 'base branch'}`
+                          ? `Rebase first to bring in ${worktreeCommitsBehind} ${terminology.commit}${worktreeCommitsBehind === 1 ? '' : 's'} from ${worktreeRepoRootBranch || `base ${terminology.branch}`}`
                           : !worktreeHasCommits
-                            ? 'No commits to merge'
-                            : `Merge commits into ${worktreeRepoRootBranch || 'base branch'}`
+                            ? `No ${terminology.commits} to merge`
+                            : `Merge ${terminology.commits} into ${worktreeRepoRootBranch || `base ${terminology.branch}`}`
                     }
                   >
                     {worktreeIsMerging ? (
@@ -1513,9 +1517,9 @@ Please proceed with this strategy.`;
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center justify-between text-[11px] font-semibold text-[var(--nim-text)]">
                       <span>
-                        Commits{' '}
+                        {terminology.commits.charAt(0).toUpperCase() + terminology.commits.slice(1)}{' '}
                         {worktreeUniqueCommitsAhead !== undefined && worktreeUniqueCommitsAhead !== worktreeCommits.length ? (
-                          <span title={`${worktreeUniqueCommitsAhead} unique commit${worktreeUniqueCommitsAhead !== 1 ? 's' : ''}, ${worktreeCommits.length - worktreeUniqueCommitsAhead} already on ${worktreeRepoRootBranch || 'base'}`}>
+                          <span title={`${worktreeUniqueCommitsAhead} unique ${terminology.commit}${worktreeUniqueCommitsAhead !== 1 ? 's' : ''}, ${worktreeCommits.length - worktreeUniqueCommitsAhead} already on ${worktreeRepoRootBranch || 'base'}`}>
                             ({worktreeUniqueCommitsAhead} unique / {worktreeCommits.length} total)
                           </span>
                         ) : (
@@ -1528,9 +1532,9 @@ Please proceed with this strategy.`;
                       <div className="flex items-center justify-between gap-2 p-2 bg-[var(--nim-bg-tertiary)] rounded border border-[var(--nim-border)]">
                         <div className="text-[11px] text-[var(--nim-text-muted)]">
                           {selectedCommits.size === 1 ? (
-                            <span>Select at least one more commit</span>
+                            <span>Select at least one more {terminology.commit}</span>
                           ) : (
-                            <span>{selectedCommits.size} commits selected</span>
+                            <span>{selectedCommits.size} {terminology.commits} selected</span>
                           )}
                         </div>
                         <div className="flex gap-2">
@@ -1547,7 +1551,7 @@ Please proceed with this strategy.`;
                             onClick={handleSquashClick}
                             disabled={selectedCommits.size < 2 || isSquashing}
                           >
-                            {isSquashing ? 'Squashing...' : `Squash ${selectedCommits.size} Commits`}
+                            {isSquashing ? 'Squashing...' : `Squash ${selectedCommits.size} ${terminology.commits.charAt(0).toUpperCase() + terminology.commits.slice(1)}`}
                           </button>
                         </div>
                       </div>
@@ -1563,7 +1567,7 @@ Please proceed with this strategy.`;
                             className={`flex items-center gap-2 p-2 rounded text-[11px] ${
                               isSelected ? 'bg-[var(--nim-bg-selected)] border border-[var(--nim-primary)]' : 'hover:bg-[var(--nim-bg-tertiary)]'
                             } ${isEquivalent ? 'opacity-60' : ''}`}
-                            title={isEquivalent ? `Equivalent commit exists on ${worktreeRepoRootBranch || 'base'} - will be skipped during rebase` : undefined}
+                            title={isEquivalent ? `Equivalent ${terminology.commit} exists on ${worktreeRepoRootBranch || 'base'} - will be skipped during rebase` : undefined}
                           >
                             {worktreeCommits.length > 1 && (
                               <input
@@ -1572,7 +1576,7 @@ Please proceed with this strategy.`;
                                 disabled={!canSelect && !isSelected}
                                 onChange={() => handleToggleCommit(commit.hash)}
                                 className="cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                                title={!canSelect && !isSelected ? 'Only consecutive commits can be squashed' : 'Select for squashing'}
+                                title={!canSelect && !isSelected ? `Only consecutive ${terminology.commits} can be squashed` : 'Select for squashing'}
                               />
                             )}
                             <div className={`font-[var(--nim-font-mono)] text-[10px] font-semibold ${isEquivalent ? 'text-[var(--nim-text-muted)]' : 'text-[var(--nim-primary)]'}`}>
