@@ -1,16 +1,8 @@
-import { execFile } from 'child_process';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { logger } from '../utils/logger';
-
-function execFileAsync(cmd: string, args: string[], opts: { cwd?: string; timeout?: number; maxBuffer?: number } = {}): Promise<{ stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    execFile(cmd, args, opts, (error, stdout, stderr) => {
-      if (error) reject(error);
-      else resolve({ stdout: stdout as string, stderr: stderr as string });
-    });
-  });
-}
+import { getVcsProvider } from '../vcs/VcsProviderFactory';
+import type { VcsProvider } from '../vcs/VcsProvider';
 
 const BINARY_EXTENSIONS = new Set([
   '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.webp', '.svg',
@@ -28,7 +20,7 @@ const BINARY_EXTENSIONS = new Set([
 ]);
 
 const IGNORED_DIRS = new Set([
-  'node_modules', '.git', 'dist', 'build', 'out', 'coverage',
+  'node_modules', '.git', '.jj', 'dist', 'build', 'out', 'coverage',
   '.next', '.nuxt', '.cache', '.turbo', '.svelte-kit', 'worktrees',
   '.vscode', '.idea', 'target', '.DS_Store',
 ]);
@@ -43,7 +35,8 @@ export class FileSnapshotCache {
   private totalBytes = 0;
   private workspacePath: string | null = null;
   private sessionId: string | null = null;
-  private isGitRepo = false;
+  private isVcsRepo = false;
+  private vcsProvider: VcsProvider | null = null;
   private startSha: string | null = null;
 
   async startSession(workspacePath: string, sessionId: string): Promise<void> {
@@ -51,10 +44,11 @@ export class FileSnapshotCache {
     this.workspacePath = workspacePath;
     this.sessionId = sessionId;
 
-    this.isGitRepo = await this.detectGitRepo(workspacePath);
+    this.vcsProvider = getVcsProvider(workspacePath);
+    this.isVcsRepo = this.vcsProvider !== null;
 
-    if (this.isGitRepo) {
-      await this.initGitCache(workspacePath);
+    if (this.isVcsRepo && this.vcsProvider) {
+      await this.initVcsCache(workspacePath);
     } else {
       await this.initFullScan(workspacePath);
     }
@@ -67,7 +61,8 @@ export class FileSnapshotCache {
     this.totalBytes = 0;
     this.workspacePath = null;
     this.sessionId = null;
-    this.isGitRepo = false;
+    this.isVcsRepo = false;
+    this.vcsProvider = null;
     this.startSha = null;
   }
 
@@ -78,23 +73,20 @@ export class FileSnapshotCache {
       return cached;
     }
 
-    // Tier 2: git on-demand
-    if (this.isGitRepo && this.startSha && this.workspacePath) {
+    // Tier 2: VCS on-demand
+    if (this.isVcsRepo && this.vcsProvider && this.startSha && this.workspacePath) {
       try {
         const resolved = await this.resolveRelativePathInWorkspace(filePath);
         if (!resolved) return null;
 
-        const content = await this.gitShow(resolved.workspacePath, this.startSha, resolved.relativePath);
-        // Cache for future lookups
+        const content = await this.vcsProvider.showAtRef(resolved.workspacePath, this.startSha, resolved.relativePath);
         this.addToCache(filePath, content);
         return content;
       } catch {
-        // File didn't exist at startSha (untracked or new)
         return null;
       }
     }
 
-    // Non-git and not in cache: file is new
     return null;
   }
 
@@ -115,7 +107,7 @@ export class FileSnapshotCache {
       fileCount: this.cache.size,
       totalBytes: this.totalBytes,
       sessionId: this.sessionId,
-      isGitRepo: this.isGitRepo,
+      isGitRepo: this.isVcsRepo,
     };
   }
 
@@ -138,59 +130,26 @@ export class FileSnapshotCache {
     this.totalBytes += byteLen;
   }
 
-  private async detectGitRepo(workspacePath: string): Promise<boolean> {
-    try {
-      await execFileAsync('git', ['rev-parse', '--git-dir'], {
-        cwd: workspacePath,
-        timeout: 5000,
-      });
-      return true;
-    } catch {
-      return false;
-    }
-  }
+  private async initVcsCache(workspacePath: string): Promise<void> {
+    if (!this.vcsProvider) return;
 
-  private async initGitCache(workspacePath: string): Promise<void> {
-    // Capture starting commit SHA
     try {
-      const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
-        cwd: workspacePath,
-        timeout: 5000,
-      });
-      this.startSha = stdout.trim();
+      this.startSha = await this.vcsProvider.revParse(workspacePath, 'HEAD');
     } catch {
-      // Repo with no commits yet
       this.startSha = null;
-      logger.main.warn('[FileSnapshotCache] No commits in repo, treating as non-git for caching');
+      logger.main.warn('[FileSnapshotCache] No commits in repo, treating as non-VCS for caching');
       await this.initFullScan(workspacePath);
       return;
     }
 
-    // Get dirty files (tracked + untracked) via git status
     try {
-      const { stdout } = await execFileAsync('git', ['status', '--porcelain'], {
-        cwd: workspacePath,
-        timeout: 10000,
-        maxBuffer: 5_000_000, // 5MB cap on git status output
-      });
-      const dirtyFiles = new Set<string>();
-      for (const line of stdout.split('\n')) {
-        if (!line.trim()) continue;
-        const status = line.slice(0, 2);
-        let filePart = line.slice(3).trim();
-        if (!filePart) continue;
-        if (status.startsWith('R') || status.startsWith('C')) {
-          const parts = filePart.split('->').map((part) => part.trim());
-          filePart = parts[parts.length - 1] || filePart;
-        }
-        dirtyFiles.add(filePart);
-      }
+      const uncommitted = await this.vcsProvider.getUncommittedFiles(workspacePath);
+      const dirtyFiles = new Set(uncommitted);
 
       if (dirtyFiles.size > MAX_DIRTY_FILES) {
-        logger.main.warn(`[FileSnapshotCache] ${dirtyFiles.size} dirty files exceeds limit of ${MAX_DIRTY_FILES}, caching only first ${MAX_DIRTY_FILES} (rest use git fallback)`);
+        logger.main.warn(`[FileSnapshotCache] ${dirtyFiles.size} dirty files exceeds limit of ${MAX_DIRTY_FILES}, caching only first ${MAX_DIRTY_FILES} (rest use VCS fallback)`);
       }
 
-      // Read each dirty file into cache (capped to avoid I/O storms)
       let cached = 0;
       for (const relativePath of dirtyFiles) {
         if (cached >= MAX_DIRTY_FILES) break;
@@ -199,7 +158,6 @@ export class FileSnapshotCache {
         if (this.isBinaryPath(absPath)) continue;
 
         try {
-          // For dirty/untracked files, read current content as pre-session baseline
           const content = await this.readFileIfEligible(absPath);
           if (content !== null) {
             this.addToCache(absPath, content);
@@ -259,15 +217,6 @@ export class FileSnapshotCache {
     } catch {
       return null;
     }
-  }
-
-  private async gitShow(workspacePath: string, sha: string, relativePath: string): Promise<string> {
-    const { stdout } = await execFileAsync(
-      'git',
-      ['show', `${sha}:${relativePath}`],
-      { cwd: workspacePath, timeout: 5000, maxBuffer: MAX_FILE_SIZE }
-    );
-    return stdout;
   }
 
   /**

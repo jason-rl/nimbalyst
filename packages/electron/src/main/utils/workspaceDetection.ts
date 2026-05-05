@@ -223,7 +223,7 @@ export function suggestWorkspaceForFile(filePath: string): string {
   // Walk up the directory tree looking for project indicators
   while (currentDir !== root) {
     // Check for common project root indicators
-    const indicators = ['.git', 'package.json', '.vscode', '.idea', 'Cargo.toml', 'go.mod'];
+    const indicators = ['.jj', '.git', 'package.json', '.vscode', '.idea', 'Cargo.toml', 'go.mod'];
 
     for (const indicator of indicators) {
       const indicatorPath = path.join(currentDir, indicator);
