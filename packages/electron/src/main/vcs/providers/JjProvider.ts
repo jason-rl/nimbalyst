@@ -603,7 +603,8 @@ export class JjProvider implements VcsProvider {
 
   async cherryPick(workspacePath: string, id: string): Promise<VcsOperationResultWithConflicts> {
     try {
-      await jjCli.exec(['rebase', '-r', id, '-d', '@'], { cwd: workspacePath });
+      // jj duplicate creates a copy of the change without moving the original
+      await jjCli.exec(['duplicate', id], { cwd: workspacePath });
       return { success: true };
     } catch (error) {
       logger.error('Failed to cherry-pick', { workspacePath, id, error });

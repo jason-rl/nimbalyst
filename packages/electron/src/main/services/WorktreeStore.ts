@@ -173,6 +173,7 @@ export function createWorktreeStore(db: PGliteLike, ensureDbReady?: EnsureReadyF
           updatedAt: toMillis(row.updated_at)!,
           isPinned: row.is_pinned ?? false,
           isArchived: row.is_archived ?? false,
+          vcsType: (row.vcs_type as 'git' | 'jj') ?? 'git',
         });
       }
 
@@ -245,6 +246,7 @@ export function createWorktreeStore(db: PGliteLike, ensureDbReady?: EnsureReadyF
         updatedAt: toMillis(row.updated_at)!,
         isPinned: row.is_pinned ?? false,
         isArchived: row.is_archived ?? false,
+        vcsType: (row.vcs_type as 'git' | 'jj') ?? 'git',
       }));
 
       logger.info('Found worktrees', { count: worktrees.length });

@@ -134,7 +134,8 @@ export class FileSnapshotCache {
     if (!this.vcsProvider) return;
 
     try {
-      this.startSha = await this.vcsProvider.revParse(workspacePath, 'HEAD');
+      const ref = this.vcsProvider.type === 'jj' ? '@' : 'HEAD';
+      this.startSha = await this.vcsProvider.revParse(workspacePath, ref);
     } catch {
       this.startSha = null;
       logger.main.warn('[FileSnapshotCache] No commits in repo, treating as non-VCS for caching');

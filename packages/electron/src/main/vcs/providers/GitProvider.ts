@@ -5,7 +5,6 @@ import { join, resolve } from 'path';
 import { promisify } from 'util';
 import log from 'electron-log/main';
 import { isGitAvailable, getNormalizedGitRemote } from '../../utils/gitUtils';
-import { gitOperationLock } from '../../services/GitOperationLock';
 import { GitWorktreeService } from '../../services/GitWorktreeService';
 import { GitStatusService } from '../../services/GitStatusService';
 import type { VcsProvider } from '../VcsProvider';
@@ -246,89 +245,77 @@ export class GitProvider implements VcsProvider {
   }
 
   async createBranch(workspacePath: string, name: string, fromRef: string): Promise<VcsOperationResult> {
-    return gitOperationLock.withLock(workspacePath, 'createBranch', async () => {
-      try {
-        const git: SimpleGit = simpleGit(workspacePath);
-        await git.checkoutBranch(name, fromRef);
-        return { success: true };
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) };
-      }
-    });
+    try {
+      const git: SimpleGit = simpleGit(workspacePath);
+      await git.checkoutBranch(name, fromRef);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   async checkout(workspacePath: string, ref: string): Promise<VcsOperationResult> {
-    return gitOperationLock.withLock(workspacePath, 'checkout', async () => {
-      try {
-        const git: SimpleGit = simpleGit(workspacePath);
-        await git.checkout(ref);
-        return { success: true };
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) };
-      }
-    });
+    try {
+      const git: SimpleGit = simpleGit(workspacePath);
+      await git.checkout(ref);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   async stageFiles(workspacePath: string, files: string[]): Promise<VcsOperationResult> {
-    return gitOperationLock.withLock(workspacePath, 'stageFiles', async () => {
-      try {
-        const git: SimpleGit = simpleGit(workspacePath);
-        await git.add(files);
-        return { success: true };
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) };
-      }
-    });
+    try {
+      const git: SimpleGit = simpleGit(workspacePath);
+      await git.add(files);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   async unstageFiles(workspacePath: string, files: string[]): Promise<VcsOperationResult> {
-    return gitOperationLock.withLock(workspacePath, 'unstageFiles', async () => {
-      try {
-        const git: SimpleGit = simpleGit(workspacePath);
-        if (!await this.hasCommits(git)) {
-          await git.raw(['rm', '--cached', ...files]);
-        } else {
-          await git.reset(['HEAD', '--', ...files]);
-        }
-        return { success: true };
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) };
+    try {
+      const git: SimpleGit = simpleGit(workspacePath);
+      if (!await this.hasCommits(git)) {
+        await git.raw(['rm', '--cached', ...files]);
+      } else {
+        await git.reset(['HEAD', '--', ...files]);
       }
-    });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   async discardChanges(workspacePath: string, files: string[]): Promise<VcsOperationResult> {
-    return gitOperationLock.withLock(workspacePath, 'discardChanges', async () => {
-      try {
-        const git: SimpleGit = simpleGit(workspacePath);
-        await git.checkout(['--', ...files]);
-        return { success: true };
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) };
-      }
-    });
+    try {
+      const git: SimpleGit = simpleGit(workspacePath);
+      await git.checkout(['--', ...files]);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   async commit(workspacePath: string, message: string, filesToStage?: string[]): Promise<VcsCommitResult> {
-    return gitOperationLock.withLock(workspacePath, 'commit', async () => {
-      try {
-        const git: SimpleGit = simpleGit(workspacePath);
+    try {
+      const git: SimpleGit = simpleGit(workspacePath);
 
-        if (filesToStage && filesToStage.length > 0) {
-          await git.add(filesToStage);
-        }
-
-        const result = await git.commit(message);
-
-        return {
-          success: true,
-          commitHash: result.commit,
-          commitDate: new Date().toISOString(),
-        };
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      if (filesToStage && filesToStage.length > 0) {
+        await git.add(filesToStage);
       }
-    });
+
+      const result = await git.commit(message);
+
+      return {
+        success: true,
+        commitHash: result.commit,
+        commitDate: new Date().toISOString(),
+      };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   async push(workspacePath: string, options?: {
@@ -337,56 +324,52 @@ export class GitProvider implements VcsProvider {
     remote?: string;
     branch?: string;
   }): Promise<VcsOperationResult> {
-    return gitOperationLock.withLock(workspacePath, 'push', async () => {
-      try {
-        const git: SimpleGit = simpleGit(workspacePath);
-        const status = await git.status();
-        const branch = options?.branch || status.current || '';
-        const remote = options?.remote || 'origin';
+    try {
+      const git: SimpleGit = simpleGit(workspacePath);
+      const status = await git.status();
+      const branch = options?.branch || status.current || '';
+      const remote = options?.remote || 'origin';
 
-        const pushArgs: string[] = [];
+      const pushArgs: string[] = [];
 
-        if (options?.setUpstream) {
-          pushArgs.push('--set-upstream', remote, branch);
-        } else if (options?.force) {
-          pushArgs.push('--force-with-lease');
-        }
-
-        await git.push(remote, branch, pushArgs);
-        return { success: true };
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      if (options?.setUpstream) {
+        pushArgs.push('--set-upstream', remote, branch);
+      } else if (options?.force) {
+        pushArgs.push('--force-with-lease');
       }
-    });
+
+      await git.push(remote, branch, pushArgs);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   async pull(workspacePath: string, options?: {
     rebase?: boolean;
     ffOnly?: boolean;
   }): Promise<VcsOperationResultWithConflicts> {
-    return gitOperationLock.withLock(workspacePath, 'pull', async () => {
-      try {
-        const git: SimpleGit = simpleGit(workspacePath);
-        const pullArgs: string[] = [];
-        if (options?.rebase) {
-          pullArgs.push('--rebase');
-        } else if (options?.ffOnly) {
-          pullArgs.push('--ff-only');
-        }
-        await git.pull(undefined, undefined, pullArgs);
-        return { success: true };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-
-        if (message.includes('CONFLICT') || message.includes('conflict')) {
-          const git: SimpleGit = simpleGit(workspacePath);
-          const status = await git.status();
-          return { success: false, error: message, conflicts: status.conflicted };
-        }
-
-        return { success: false, error: message };
+    try {
+      const git: SimpleGit = simpleGit(workspacePath);
+      const pullArgs: string[] = [];
+      if (options?.rebase) {
+        pullArgs.push('--rebase');
+      } else if (options?.ffOnly) {
+        pullArgs.push('--ff-only');
       }
-    });
+      await git.pull(undefined, undefined, pullArgs);
+      return { success: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      if (message.includes('CONFLICT') || message.includes('conflict')) {
+        const git: SimpleGit = simpleGit(workspacePath);
+        const status = await git.status();
+        return { success: false, error: message, conflicts: status.conflicted };
+      }
+
+      return { success: false, error: message };
+    }
   }
 
   async fetch(workspacePath: string, options?: { remote?: string }): Promise<VcsOperationResult> {
@@ -415,35 +398,33 @@ export class GitProvider implements VcsProvider {
     target?: string;
     action?: 'continue' | 'abort' | 'skip';
   }): Promise<VcsOperationResultWithConflicts> {
-    return gitOperationLock.withLock(workspacePath, 'rebase', async () => {
-      try {
-        const git: SimpleGit = simpleGit(workspacePath);
+    try {
+      const git: SimpleGit = simpleGit(workspacePath);
 
-        if (options.action === 'continue') {
-          await git.rebase(['--continue']);
-        } else if (options.action === 'abort') {
-          await git.rebase(['--abort']);
-        } else if (options.action === 'skip') {
-          await git.rebase(['--skip']);
-        } else if (options.target) {
-          await git.rebase([options.target]);
-        } else {
-          throw new Error('rebase requires either a target branch or an action (continue/abort/skip)');
-        }
-
-        return { success: true };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-
-        if (message.includes('CONFLICT') || message.includes('conflict')) {
-          const git: SimpleGit = simpleGit(workspacePath);
-          const status = await git.status();
-          return { success: false, error: message, conflicts: status.conflicted };
-        }
-
-        return { success: false, error: message };
+      if (options.action === 'continue') {
+        await git.rebase(['--continue']);
+      } else if (options.action === 'abort') {
+        await git.rebase(['--abort']);
+      } else if (options.action === 'skip') {
+        await git.rebase(['--skip']);
+      } else if (options.target) {
+        await git.rebase([options.target]);
+      } else {
+        throw new Error('rebase requires either a target branch or an action (continue/abort/skip)');
       }
-    });
+
+      return { success: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      if (message.includes('CONFLICT') || message.includes('conflict')) {
+        const git: SimpleGit = simpleGit(workspacePath);
+        const status = await git.status();
+        return { success: false, error: message, conflicts: status.conflicted };
+      }
+
+      return { success: false, error: message };
+    }
   }
 
   async getRebaseStatus(workspacePath: string): Promise<{
@@ -510,23 +491,21 @@ export class GitProvider implements VcsProvider {
   }
 
   async cherryPick(workspacePath: string, id: string): Promise<VcsOperationResultWithConflicts> {
-    return gitOperationLock.withLock(workspacePath, 'cherryPick', async () => {
-      try {
+    try {
+      const git: SimpleGit = simpleGit(workspacePath);
+      await git.raw(['cherry-pick', id]);
+      return { success: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      if (message.includes('CONFLICT') || message.includes('conflict')) {
         const git: SimpleGit = simpleGit(workspacePath);
-        await git.raw(['cherry-pick', id]);
-        return { success: true };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-
-        if (message.includes('CONFLICT') || message.includes('conflict')) {
-          const git: SimpleGit = simpleGit(workspacePath);
-          const status = await git.status();
-          return { success: false, error: message, conflicts: status.conflicted };
-        }
-
-        return { success: false, error: message };
+        const status = await git.status();
+        return { success: false, error: message, conflicts: status.conflicted };
       }
-    });
+
+      return { success: false, error: message };
+    }
   }
 
   async createIsolatedEnv(workspacePath: string, options?: {
@@ -627,19 +606,17 @@ export class GitProvider implements VcsProvider {
   }
 
   async stageAllInEnv(envPath: string, stage: boolean): Promise<VcsOperationResult> {
-    return gitOperationLock.withLock(envPath, 'stageAll', async () => {
-      try {
-        const git: SimpleGit = simpleGit(envPath);
-        if (stage) {
-          await git.add('-A');
-        } else {
-          await git.reset();
-        }
-        return { success: true };
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) };
+    try {
+      const git: SimpleGit = simpleGit(envPath);
+      if (stage) {
+        await git.add('-A');
+      } else {
+        await git.reset();
       }
-    });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   async checkCommitsExistElsewhere(envPath: string, commitHashes: string[]): Promise<boolean> {
