@@ -13,7 +13,7 @@ import { createWorktreeStore } from './WorktreeStore';
 import { GitWorktreeService } from './GitWorktreeService';
 import { database as databaseWorker } from '../database/PGLiteDatabaseWorker';
 import { getDatabase } from '../database/initialize';
-import { gitRefWatcher } from '../file/GitRefWatcher';
+import { vcsRefWatcher } from '../file/VcsRefWatcher';
 import { AIService } from './ai/AIService';
 import {
   startMetaAgentServer,
@@ -316,8 +316,8 @@ export class MetaAgentService {
       const finalName = gitWorktreeService.generateUniqueWorktreeName(existingNames);
       const worktree = await gitWorktreeService.createWorktree(workspaceId, { name: finalName });
       await worktreeStore.create(worktree);
-      gitRefWatcher.start(worktree.path).catch((error: Error) => {
-        console.error('[MetaAgentService] Failed to start GitRefWatcher for meta-agent worktree:', error);
+      vcsRefWatcher.start(worktree.path).catch((error: Error) => {
+        console.error('[MetaAgentService] Failed to start VcsRefWatcher for meta-agent worktree:', error);
       });
       worktreeId = worktree.id;
       worktreePath = worktree.path;

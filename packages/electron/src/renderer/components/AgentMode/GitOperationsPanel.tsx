@@ -269,8 +269,8 @@ export const GitOperationsPanel: React.FC<GitOperationsPanelProps> = React.memo(
 
       fetchGitStatus();
 
-      // Listen for git status changes (from GitRefWatcher)
-      // No polling needed - GitRefWatcher provides immediate updates
+      // Listen for git status changes (from VcsRefWatcher)
+      // No polling needed - VcsRefWatcher provides immediate updates
       const unsubscribe = window.electronAPI?.git?.onStatusChanged?.(
         (data: { workspacePath: string }) => {
           if (data.workspacePath === workspacePath) {
@@ -303,7 +303,7 @@ export const GitOperationsPanel: React.FC<GitOperationsPanelProps> = React.memo(
 
       fetchCommits();
 
-      // Listen for new commits (from GitRefWatcher)
+      // Listen for new commits (from VcsRefWatcher)
       const unsubscribe = window.electronAPI?.git?.onCommitDetected?.(
         (data: { workspacePath: string }) => {
           if (data.workspacePath === workspacePath) {

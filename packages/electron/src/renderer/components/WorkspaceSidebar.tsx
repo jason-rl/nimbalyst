@@ -778,7 +778,7 @@ export function WorkspaceSidebar({
     return () => clearTimeout(timeoutId);
   }, [fileTree, isGitRepo, loadGitFileStatuses]);
 
-  // Listen for git status changes from GitRefWatcher (staging, commits, etc.)
+  // Listen for git status changes from VcsRefWatcher (staging, commits, etc.)
   // This provides immediate updates when git operations occur from any source
   useEffect(() => {
     if (!isGitRepo || !workspacePath) {

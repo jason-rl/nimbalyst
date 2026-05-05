@@ -1096,7 +1096,7 @@ export class AIService {
             const { GitWorktreeService } = await import('../GitWorktreeService');
             const { createWorktreeStore } = await import('../WorktreeStore');
             const { getDatabase } = await import('../../database/initialize');
-            const { gitRefWatcher } = await import('../../file/GitRefWatcher');
+            const { vcsRefWatcher } = await import('../../file/VcsRefWatcher');
 
             const gitWorktreeService = new GitWorktreeService();
             const db = getDatabase();
@@ -1121,9 +1121,9 @@ export class AIService {
             // Store in WorktreeStore (same as worktree:create)
             await worktreeStore.create(worktree);
 
-            // Start git ref watcher (same as worktree:create)
-            gitRefWatcher.start(worktree.path).catch((err: Error) => {
-              logger.main.error('[AIService] Failed to start GitRefWatcher for worktree:', err);
+            // Start VCS ref watcher (same as worktree:create)
+            vcsRefWatcher.start(worktree.path).catch((err: Error) => {
+              logger.main.error('[AIService] Failed to start VcsRefWatcher for worktree:', err);
             });
 
             logger.main.info('[AIService] Worktree created from mobile:', worktree.id, 'name:', worktree.name, 'branch:', worktree.branch);

@@ -16,7 +16,7 @@ import { AISessionsRepository } from '@nimbalyst/runtime/storage/repositories/AI
 import { AnalyticsService } from '../services/analytics/AnalyticsService';
 import { getTerminalSessionManager } from '../services/TerminalSessionManager';
 import { getTerminalsByWorktreeId, deleteTerminalInstance } from '../utils/terminalStore';
-import { gitRefWatcher } from '../file/GitRefWatcher';
+import { vcsRefWatcher } from '../file/VcsRefWatcher';
 import type { WorktreeCreateResult } from '../../shared/ipc/types';
 import { gitOperationLock } from '../services/GitOperationLock';
 import fs from 'node:fs';
@@ -148,7 +148,7 @@ export async function archiveWorktree(worktreeId: string, workspacePath: string)
     archiveLogger.info('Destroyed terminal processes for worktree sessions', { worktreeId });
 
     // Stop the git ref watcher for this worktree (it's being archived/deleted)
-    await gitRefWatcher.stop(worktree.path);
+    await vcsRefWatcher.stop(worktree.path);
 
     // Step 2b: Delete terminals associated with this worktree
     // Terminals have a worktreeId field that links them to the worktree.
@@ -369,8 +369,8 @@ export function registerWorktreeHandlers(): void {
         createdWorktree = null;
 
         // Start git ref watcher for the worktree path to detect commits
-        gitRefWatcher.start(worktree.path).catch((error) => {
-          logger.error('Failed to start GitRefWatcher for worktree:', error);
+        vcsRefWatcher.start(worktree.path).catch((error) => {
+          logger.error('Failed to start VcsRefWatcher for worktree:', error);
         });
 
         const totalDuration = Date.now() - startTime;
@@ -547,7 +547,7 @@ export function registerWorktreeHandlers(): void {
       }
 
       // Stop the git ref watcher for this worktree
-      await gitRefWatcher.stop(worktree.path);
+      await vcsRefWatcher.stop(worktree.path);
 
       // Delete the git worktree
       await gitWorktreeService.deleteWorktree(worktree.path, workspacePath);
@@ -604,8 +604,8 @@ export function registerWorktreeHandlers(): void {
 
         Promise.all(
           activeWorktrees.map(worktree =>
-            limitConcurrency(() => gitRefWatcher.start(worktree.path)).catch((error) => {
-              logger.warn('Failed to start GitRefWatcher for worktree:', {
+            limitConcurrency(() => vcsRefWatcher.start(worktree.path)).catch((error) => {
+              logger.warn('Failed to start VcsRefWatcher for worktree:', {
                 worktreeId: worktree.id,
                 path: worktree.path,
                 error: error instanceof Error ? error.message : String(error),
@@ -1398,7 +1398,7 @@ export function registerWorktreeHandlers(): void {
 
       logger.info('Starting git ref watcher for worktree', { worktreePath });
 
-      await gitRefWatcher.start(worktreePath);
+      await vcsRefWatcher.start(worktreePath);
 
       return { success: true };
     } catch (error) {

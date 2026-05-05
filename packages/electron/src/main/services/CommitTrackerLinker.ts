@@ -3,7 +3,7 @@
  *
  * Three linking mechanisms:
  * 1. Session-based: After proposal-widget commits, links to session's tracker items
- * 2. Issue key parsing: Parses NIM-123 from any commit message detected by GitRefWatcher
+ * 2. Issue key parsing: Parses NIM-123 from any commit message detected by VcsRefWatcher
  * 3. Auto-close: Fixes/Closes/Resolves keywords change tracker item status to "done"
  *
  * All behaviors gated by TrackerAutomation settings (opt-in, per-project overridable).
@@ -11,7 +11,7 @@
 
 import Store from 'electron-store';
 import { logger } from '../utils/logger';
-import type { CommitDetectedEvent } from '../file/GitRefWatcher';
+import type { CommitDetectedEvent } from '../file/VcsRefWatcher';
 import type { TrackerAutomationSettings } from '../utils/store';
 import { getEffectiveTrackerAutomation } from '../utils/store';
 import type { LinkedCommit } from '@nimbalyst/runtime';
@@ -88,7 +88,7 @@ export class CommitTrackerLinker {
   }
 
   /**
-   * Handle a commit detected by GitRefWatcher.
+   * Handle a commit detected by VcsRefWatcher.
    * This is the main entry point, registered as a commit listener.
    */
   async handleCommitDetected(event: CommitDetectedEvent): Promise<void> {

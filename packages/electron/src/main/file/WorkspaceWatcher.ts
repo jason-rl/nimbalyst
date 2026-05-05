@@ -3,7 +3,7 @@ import { safeHandle } from '../utils/ipcRegistry';
 import { logger } from '../utils/logger';
 import { getWindowId, windowStates } from '../window/WindowManager';
 import { optimizedWorkspaceWatcher } from './OptimizedWorkspaceWatcher';
-import { gitRefWatcher } from './GitRefWatcher';
+import { vcsRefWatcher } from './VcsRefWatcher';
 import * as workspaceEventBus from './WorkspaceEventBus';
 import { AnalyticsService } from '../services/analytics/AnalyticsService';
 import { readdirSync } from 'fs';
@@ -91,9 +91,9 @@ export function startWorkspaceWatcher(window: BrowserWindow, workspacePath: stri
     // logger.workspaceWatcher.info('Using OptimizedWorkspaceWatcher for:', workspacePath);
     optimizedWorkspaceWatcher.start(window, workspacePath);
 
-    // Start git ref watcher for this workspace (detects commits and staging changes)
-    gitRefWatcher.start(workspacePath).catch((error) => {
-        logger.workspaceWatcher.error('Failed to start GitRefWatcher:', error);
+    // Start VCS ref watcher for this workspace (detects commits and staging changes)
+    vcsRefWatcher.start(workspacePath).catch((error) => {
+        logger.workspaceWatcher.error('Failed to start VcsRefWatcher:', error);
     });
 
     // Start project file sync for .md files (non-blocking, non-fatal)
@@ -121,7 +121,7 @@ export function stopWorkspaceWatcher(windowId: number) {
     }
 
     optimizedWorkspaceWatcher.stop(windowId);
-    // Note: gitRefWatcher is keyed by workspacePath, not windowId.
+    // Note: vcsRefWatcher is keyed by workspacePath, not windowId.
     // It will be stopped when stopAllWorkspaceWatchers is called.
 }
 
@@ -159,7 +159,7 @@ export async function stopAllWorkspaceWatchers() {
     try {
         await Promise.all([
             optimizedWorkspaceWatcher.stopAll(),
-            gitRefWatcher.stopAll(),
+            vcsRefWatcher.stopAll(),
             workspaceEventBus.stopAll(),
         ]);
         console.log('[WorkspaceWatcher] stopAll completed');

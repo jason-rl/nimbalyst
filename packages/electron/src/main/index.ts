@@ -120,7 +120,7 @@ import { setupForceQuit } from './utils/forceQuit';
 import { stopAllFileWatchers } from './file/FileWatcher';
 import { stopAllWorkspaceWatchers } from './file/WorkspaceWatcher.ts';
 import { commitTrackerLinker } from './services/CommitTrackerLinker';
-import { gitRefWatcher } from './file/GitRefWatcher';
+import { vcsRefWatcher } from './file/VcsRefWatcher';
 import { autoUpdaterService, AutoUpdaterService } from './services/autoUpdater';
 import { initializeDatabase } from './database/initialize';
 import { database, HandledError } from './database/PGLiteDatabaseWorker';
@@ -1107,9 +1107,9 @@ app.whenReady().then(async () => {
     registerTrackerSyncHandlers();
     initTrackerSchemaService(); // Register IPC handlers + load built-in schemas
 
-    // Initialize commit-tracker linking (listens to GitRefWatcher for all commits)
+    // Initialize commit-tracker linking (listens to VcsRefWatcher for all commits)
     commitTrackerLinker.initialize({ getDatabase: () => database });
-    gitRefWatcher.onCommitDetected((event) => commitTrackerLinker.handleCommitDetected(event));
+    vcsRefWatcher.onCommitDetected((event) => commitTrackerLinker.handleCommitDetected(event));
 
     registerTeamHandlers();
     registerOrgKeyHandlers();
